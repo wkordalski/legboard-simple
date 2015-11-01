@@ -95,10 +95,23 @@ usbRequest_t    *rq = (void *)data;
 
 /* ------------------------------------------------------------------------- */
 
-static uchar stab, scnt, read, keys;
-const uchar smax = 8;
+// Potential sequence of keys pressed
+static uchar stab;
+// Number of step to wait for becoming potential sequence a confirmed sequence.
+static uchar scnt;      // Number of current step
+const uchar smax = 8;   // Number of the last step
+// Confirmed sequence - sent via USB.
+static uchar read;
+// Recently read sequence
+static uchar keys;
 
+// For pulsing keys
+// (button is released just after it was pressed - software implementation)
+const uchar pulsing_mask = 0xff;
+static uchar pulsing_active = 0xff;
 
+// Really read - this sees USB driver - calculated every USB sending.
+static uchar rread;
 
 void check()
 {
@@ -117,6 +130,8 @@ void check()
 		if(scnt == smax)
 		{
 			read = stab;
+      // jeśli jakiś pulsing został wyłączony - zapal pulsing_active
+      pulsing_active |= ((~read) & pulsing_mask);
 		}
 	}	
 }
@@ -194,7 +209,8 @@ uchar   i, kc;
         usbPoll();
 				check();
 				idle();
-        if(usbInterruptIsReady() && (read != keys || xtra))
+        rread = read & ((~pulsing_mask) | pulsing_active);
+        if(usbInterruptIsReady() && (rread != keys || xtra))
 				{
             // todo
 						buffer.mod = 0;
@@ -206,22 +222,45 @@ uchar   i, kc;
 						buffer.keys[4] = 0;
 						buffer.keys[5] = 0;
 						kc = 0;
-						if(read & 1)
+            // UNUSED
+            /*
+						if(rread & 1)
 						{
-							buffer.keys[kc++] = 64;	// F7
 						}
-						if(read & 2)
+						if(rread & 2)
 						{
-							buffer.keys[kc++] = 66;	// F9
 						}
-						if(read & 4)
+						if(rread & 4)
 						{
-							buffer.keys[kc++] = 73;	// Insert
 						}
+						*/
+						if(rread & 8)
+            {
+              buffer.keys[kc++] = 0x49;	// Insert
+            }
+            if(rread & 16)
+            {
+              buffer.keys[kc++] = 0x41; // F8
+            }
+            if(rread & 32)
+            {
+              buffer.keys[kc++] = 0x40; // F7
+            }
+            if(rread & 64)
+            {
+              buffer.keys[kc++] = 0x2C; // Space
+            }
+            if(rread & 128)
+            {
+              buffer.keys[kc++] = 0x29; // ESCAPE
+            }
 						if(kc == 0) buffer.mod = 0;
-						keys = read;
+						keys = rread;
             DBG1(0x03, 0, 0);   /* debug output: interrupt report prepared */
             usbSetInterrupt((void *)&buffer, sizeof(buffer));
+            // Pulsing support
+            pulsing_active &= ~(read & pulsing_mask);
+            xtra = 0;     // I think it should be there... - TODO: test it
         }
     }
 }
